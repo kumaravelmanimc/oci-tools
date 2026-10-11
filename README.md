@@ -7,6 +7,8 @@ Static, GitHub Pages-ready tools for direct browser-to-OCI Object Storage upload
 - `/` — tools homepage
 - `/dump-upload/` — Oracle Data Pump `.dmp` uploads only
 - `/file-uploads/` — general file uploads
+- `/par-download/` — browse and download objects with a bucket-level read PAR
+- `/script-generator/` — generate reviewable OCI Bastion, DBMS_CLOUD, Data Pump, Object Storage, and database-user runbooks
 
 ## Publish
 
