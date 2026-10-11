@@ -1,4 +1,4 @@
-# Axcord OCI Tools
+# OCI Tools
 
 Static, GitHub Pages-ready tools for direct browser-to-OCI Object Storage uploads.
 
