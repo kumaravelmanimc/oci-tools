@@ -1,0 +1,13 @@
+# Never commit Oracle dumps, credentials, or local exports
+*.dmp
+*.zip
+*.7z
+*.rar
+*.p12
+*.sso
+*.pem
+*.key
+.env
+.env.*
+.DS_Store
+Thumbs.db
