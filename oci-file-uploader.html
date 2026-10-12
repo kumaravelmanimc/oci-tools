@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OCI File Uploader</title>
+  <style>
+    :root { font-family: Inter, "Segoe UI", Arial, sans-serif; color: #1b2937; background: #f4f7fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .top { background: #142d46; color: #fff; padding: 23px max(22px, calc((100vw - 850px) / 2)); }
+    .brand { font-size: 24px; font-weight: 750; letter-spacing: .3px; }
+    .top small { color: #c9d7e4; }
+    .wrap { max-width: 850px; margin: 28px auto; padding: 0 16px; }
+    .panel { margin-bottom: 18px; padding: 26px; border: 1px solid #dce5ef; border-radius: 14px; background: #fff; box-shadow: 0 8px 25px #17344d0c; }
+    h1 { margin: 0 0 8px; font-size: 23px; }
+    h2 { margin: 0 0 12px; font-size: 17px; }
+    p, ul { color: #526273; line-height: 1.55; }
+    ul { line-height: 1.65; }
+    label { display: block; margin: 15px 0 7px; font-size: 14px; font-weight: 650; }
+    input[type="url"] { width: 100%; padding: 13px; border: 1px solid #b8c8d8; border-radius: 8px; font-size: 14px; }
+    input:focus { outline: 2px solid #4d9dd6; }
+    input[type="file"] { width: 100%; padding: 18px; border: 2px dashed #b7cadd; border-radius: 9px; background: #f7fbff; }
+    .hint { margin: 7px 0; color: #637386; font-size: 12px; }
+    .note { margin-top: 18px; padding: 12px 14px; border-left: 3px solid #dfad47; border-radius: 5px; background: #fff9eb; color: #655124; font-size: 13px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    button { padding: 12px 19px; border: 0; border-radius: 8px; background: #1661a4; color: #fff; font-weight: 650; cursor: pointer; }
+    button.secondary { background: #e6edf5; color: #18334c; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .file { margin-top: 10px; padding: 13px; border: 1px solid #e2e9f1; border-radius: 9px; }
+    .filetop { display: flex; justify-content: space-between; gap: 12px; word-break: break-word; }
+    .muted { color: #637386; font-size: 12px; }
+    .bar { height: 8px; margin: 10px 0; overflow: hidden; border-radius: 9px; background: #e6edf4; }
+    .fill { width: 0; height: 100%; background: #247ab8; transition: width .2s; }
+    .status { color: #536a7e; font-size: 12px; white-space: pre-wrap; }
+    .success { color: #137147; }
+    .error { color: #af3232; }
+    .message { display: none; margin-top: 15px; padding: 10px 12px; border: 1px solid #e2a5a5; border-left: 4px solid #b42318; border-radius: 6px; background: #fff1f0; color: #7a271a; font-size: 13px; }
+    .message.show { display: block; }
+    .footer { padding: 8px 0 24px; color: #657486; font-size: 12px; text-align: center; }
+    code { overflow-wrap: anywhere; }
+    @media (max-width: 600px) { .panel { padding: 18px; } .top { padding: 18px; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">OCI File Uploader</div>
+    <small>Secure browser-to-OCI Object Storage transfer</small>
+  </header>
+
+  <main class="wrap">
+    <section class="panel">
+      <h1>Upload Files to OCI Object Storage</h1>
+      <p>Enter the temporary upload link provided by your administrator. Files transfer directly from this browser to Oracle Cloud Object Storage.</p>
+
+      <label for="par">OCI bucket-level upload PAR URL</label>
+      <input id="par" type="url" autocomplete="off" spellcheck="false" placeholder="https://objectstorage.&lt;region&gt;.oraclecloud.com/p/.../o/">
+      <div class="hint">The URL must end in <code>/o/</code>. The link is not stored by this page.</div>
+
+      <label for="files">Select files</label>
+      <input id="files" type="file" multiple>
+      <div class="hint">Choose one or more files to upload.</div>
+
+      <div class="note"><b>Large-file limitation:</b> This page uses single-request uploads. OCI Object Storage single PUT uploads have a 50 GiB limit per object. Files larger than that require a multipart-capable uploader. Interrupted uploads cannot be resumed here. Keep this page open while uploading.</div>
+      <div id="message" class="message" role="alert" aria-live="assertive"></div>
+      <div class="actions">
+        <button id="start" type="button">Start upload</button>
+        <button id="cancel" type="button" class="secondary" disabled>Cancel current upload</button>
+      </div>
+      <p id="summary" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Transfer status</h2>
+      <div id="items"><p class="muted">No files selected.</p></div>
+    </section>
+
+    <section class="panel">
+      <h2>Customer instructions</h2>
+      <ul>
+        <li>Upload only files authorized by the receiving team.</li>
+        <li>All file extensions are accepted; PAR permissions govern actual OCI access.</li>
+        <li>Keep original filenames. Objects with matching names may overwrite existing objects.</li>
+        <li>Share the uploaded filenames and sizes with your support contact.</li>
+        <li>Never forward the PAR link to unauthorized people.</li>
+      </ul>
+    </section>
+
+    <div class="footer">Browser-to-OCI transfer • Open this file in a modern browser</div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+      const $ = id => document.getElementById(id);
+      const MAX_FILE_SIZE = 50 * 1024 ** 3;
+      let currentRequest = null;
+      let busy = false;
+
+      const humanSize = bytes => bytes >= 1024 ** 3
+        ? (bytes / 1024 ** 3).toFixed(2) + " GiB"
+        : (bytes / 1024 ** 2).toFixed(1) + " MiB";
+
+      const escapeHtml = text => text.replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+      })[char]);
+
+      function validPar(value) {
+        try {
+          const url = new URL(value);
+          return url.protocol === "https:"
+            && /^objectstorage\.[a-z0-9-]+\.oraclecloud\.com$/i.test(url.hostname)
+            && /^\/p\/[^/]+\/n\/[^/]+\/b\/[^/]+\/o\/$/.test(url.pathname)
+            && !url.search
+            && !url.hash;
+        } catch {
+          return false;
+        }
+      }
+
+      function showMessage(text) {
+        $("message").textContent = text;
+        $("message").classList.add("show");
+      }
+
+      function clearMessage() {
+        $("message").classList.remove("show");
+      }
+
+      function renderFiles() {
+        const files = [...$("files").files];
+        $("items").innerHTML = files.length
+          ? files.map((file, index) => `<div class="file" id="item${index}">
+              <div class="filetop"><strong>${escapeHtml(file.name)}</strong><span class="muted">${humanSize(file.size)}</span></div>
+              <div class="bar"><div class="fill" id="fill${index}"></div></div>
+              <div class="status" id="stat${index}">Waiting</div>
+            </div>`).join("")
+          : '<p class="muted">No files selected.</p>';
+      }
+
+      function setStatus(index, text, className = "") {
+        const element = $("stat" + index);
+        if (element) {
+          element.textContent = text;
+          element.className = "status " + className;
+        }
+      }
+
+      function sendFile(file, url, index) {
+        return new Promise((resolve, reject) => {
+          const request = new XMLHttpRequest();
+          currentRequest = request;
+          const startedAt = Date.now();
+          request.open("PUT", url, true);
+          request.timeout = 0;
+          request.setRequestHeader("Content-Type", "application/octet-stream");
+          request.upload.onprogress = event => {
+            if (!event.lengthComputable) return;
+            const percent = Math.min(100, Math.round(100 * event.loaded / event.total));
+            $("fill" + index).style.width = percent + "%";
+            const seconds = Math.max(1, (Date.now() - startedAt) / 1000);
+            setStatus(index, `${percent}% • ${humanSize(event.loaded)} / ${humanSize(event.total)} • ${humanSize(event.loaded / seconds)}/s`);
+          };
+          request.onload = () => request.status >= 200 && request.status < 300
+            ? resolve()
+            : reject(new Error("HTTP " + request.status + " — check PAR expiry, permissions, CORS, and object size"));
+          request.onerror = () => reject(new Error("Network/CORS error — check OCI bucket CORS rules and PAR permissions"));
+          request.onabort = () => reject(new Error("Cancelled"));
+          request.send(file);
+        });
+      }
+
+      $("files").addEventListener("change", () => { clearMessage(); renderFiles(); });
+      $("par").addEventListener("input", clearMessage);
+      $("cancel").addEventListener("click", () => currentRequest?.abort());
+      $("start").addEventListener("click", async () => {
+        if (busy) return;
+        clearMessage();
+        $("summary").textContent = "";
+        const par = $("par").value.trim();
+        const files = [...$("files").files];
+
+        if (!validPar(par)) return showMessage("Enter a valid OCI bucket-level PAR URL ending in /o/.");
+        if (!files.length) return showMessage("Select one or more files.");
+        if (files.some(file => file.size === 0)) return showMessage("Empty files are not accepted.");
+        if (files.some(file => file.size > MAX_FILE_SIZE)) return showMessage("At least one file exceeds 50 GiB. Use a multipart upload tool for that file.");
+        if (new Set(files.map(file => file.name)).size !== files.length) return showMessage("Duplicate filenames selected. Rename the files before uploading.");
+
+        busy = true;
+        $("start").disabled = true;
+        $("cancel").disabled = false;
+        $("files").disabled = true;
+        $("par").disabled = true;
+        renderFiles();
+
+        let completed = 0;
+        for (let index = 0; index < files.length; index++) {
+          try {
+            setStatus(index, "Uploading…");
+            await sendFile(files[index], par + encodeURIComponent(files[index].name), index);
+            $("fill" + index).style.width = "100%";
+            setStatus(index, "Uploaded successfully", "success");
+            completed++;
+          } catch (error) {
+            setStatus(index, "Failed: " + error.message, "error");
+            $("summary").textContent = `${completed} of ${files.length} uploaded. Upload stopped. Check the error before retrying.`;
+            break;
+          } finally {
+            currentRequest = null;
+          }
+        }
+
+        if (completed === files.length) {
+          $("summary").textContent = `All ${completed} file(s) uploaded successfully. Confirm object names and sizes with the receiving team.`;
+        }
+        busy = false;
+        $("start").disabled = false;
+        $("cancel").disabled = true;
+        $("files").disabled = false;
+        $("par").disabled = false;
+      });
+    })();
+  </script>
+</body>
+</html>
